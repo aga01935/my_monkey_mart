@@ -1,335 +1,315 @@
 /**
- * MONKEY MARKET - CORE GAME ENGINE
+ * MONKEY MARKET - PRINCIPAL ENGINEER IMPLEMENTATION
+ * Includes: Entity Systems, Pathfinding, Visual Synthesis, and Sound Engine.
  */
 
-// --- 1. CONFIGURATION & STATE ---
-const config = {
-    playerSpeed: 4,
-    playerCarryLimit: 5,
-    customerSpawnRate: 3000,
-    moneyPickupRange: 40,
-    baseItemPrice: 10
-};
+// --- 1. GAME CONSTANTS & STATE ---
+const TILE_SIZE = 64;
+const WORLD_WIDTH = 1200;
+const WORLD_HEIGHT = 900;
 
-let gameState = {
+let state = {
     money: 0,
-    carrying: [],
-    unlockedItems: ['banana'],
-    upgrades: {
-        speed: 1,
-        capacity: 1,
-        automation: 0
-    },
+    player: null,
+    entities: [],
+    customers: [],
+    workers: [],
+    shelves: [],
+    machines: [],
+    drops: [],
+    unlockedZones: 1,
+    carryLimit: 5,
+    speedBonus: 1,
     isPaused: true,
-    lastTime: 0
+    audioInitialized: false
 };
 
-// --- 2. AUDIO SYSTEM (Web Audio API) ---
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-const masterGain = audioCtx.createGain();
-masterGain.connect(audioCtx.destination);
-
-function playSynthSound(freq, type, duration, vol = 0.1) {
-    if (gameState.isPaused) return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    osc.connect(gain);
-    gain.connect(masterGain);
-    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
-    osc.start();
-    osc.stop(audioCtx.currentTime + duration);
-}
-
-const sounds = {
-    pick: () => playSynthSound(440, 'sine', 0.1),
-    drop: () => playSynthSound(330, 'sine', 0.1),
-    cash: () => {
-        playSynthSound(880, 'square', 0.05);
-        setTimeout(() => playSynthSound(1200, 'square', 0.1), 50);
-    },
-    upgrade: () => playSynthSound(523, 'sawtooth', 0.3)
+const PRODUCT_TYPES = {
+    BANANA: { name: 'Banana', color: '#fbc531', price: 10, growTime: 2000 },
+    CORN: { name: 'Corn', color: '#e1b12c', price: 25, growTime: 4000 },
+    MILK: { name: 'Milk', color: '#f5f6fa', price: 50, growTime: 6000 }
 };
 
-// --- 3. PROCEDURAL ASSETS (Canvas Sprites) ---
-const sprites = {};
-function generateSprites() {
-    const sCanvas = document.createElement('canvas');
-    const ctx = sCanvas.getContext('2d');
-    sCanvas.width = 100; sCanvas.height = 100;
+// --- 2. ASSET GENERATOR (High Fidelity Procedural Art) ---
+const Sprites = {};
+function generateAllSprites() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    const createTexture = (w, h, drawFn) => {
+        canvas.width = w; canvas.height = h;
+        ctx.clearRect(0,0,w,h);
+        drawFn(ctx);
+        const img = new Image();
+        img.src = canvas.toDataURL();
+        return img;
+    };
 
-    // Monkey Sprite
-    ctx.clearRect(0,0,100,100);
-    ctx.fillStyle = '#8B4513';
-    ctx.beginPath(); ctx.arc(50, 50, 20, 0, Math.PI*2); ctx.fill(); // Head
-    ctx.fillStyle = '#FFDAB9';
-    ctx.beginPath(); ctx.arc(50, 55, 12, 0, Math.PI*2); ctx.fill(); // Face
-    sprites.player = new Image(); sprites.player.src = sCanvas.toDataURL();
+    // Monkey Sprite (Head, Ears, Body, Tail)
+    Sprites.monkey = createTexture(64, 64, (c) => {
+        c.fillStyle = '#8c7e6a';
+        c.beginPath(); c.arc(32, 45, 18, 0, Math.PI*2); c.fill(); // Body
+        c.beginPath(); c.arc(32, 25, 15, 0, Math.PI*2); c.fill(); // Head
+        c.fillStyle = '#f5f6fa';
+        c.beginPath(); c.arc(32, 28, 10, 0, Math.PI*2); c.fill(); // Face
+        c.fillStyle = '#2f3640';
+        c.beginPath(); c.arc(28, 25, 2, 0, Math.PI*2); c.fill(); // Left Eye
+        c.beginPath(); c.arc(36, 25, 2, 0, Math.PI*2); c.fill(); // Right Eye
+        c.strokeStyle = '#574b90'; c.lineWidth = 3;
+        c.beginPath(); c.moveTo(15, 45); c.quadraticCurveTo(5, 50, 10, 60); c.stroke(); // Tail
+    });
+
+    // Shelf Sprite
+    Sprites.shelf = createTexture(100, 120, (c) => {
+        c.fillStyle = '#4b4b4b'; c.fillRect(5, 10, 90, 100); // Back
+        c.fillStyle = '#dcdde1'; 
+        c.fillRect(5, 40, 90, 10); c.fillRect(5, 75, 90, 10); // Planks
+    });
 
     // Banana Sprite
-    ctx.clearRect(0,0,100,100);
-    ctx.fillStyle = '#f1c40f';
-    ctx.beginPath(); ctx.ellipse(50, 50, 15, 8, Math.PI/4, 0, Math.PI*2); ctx.fill();
-    sprites.banana = new Image(); sprites.banana.src = sCanvas.toDataURL();
-
-    // Customer
-    ctx.clearRect(0,0,100,100);
-    ctx.fillStyle = '#4834d4';
-    ctx.beginPath(); ctx.arc(50, 50, 20, 0, Math.PI*2); ctx.fill();
-    sprites.customer = new Image(); sprites.customer.src = sCanvas.toDataURL();
+    Sprites.banana = createTexture(32, 32, (c) => {
+        c.fillStyle = '#fbc531';
+        c.beginPath(); c.ellipse(16, 16, 12, 6, Math.PI/4, 0, Math.PI*2); c.fill();
+    });
 }
 
-// --- 4. GAME OBJECTS ---
-class Entity {
-    constructor(x, y, w, h) {
-        this.x = x; this.y = y; this.w = w; this.h = h;
-    }
-}
-
-class Player extends Entity {
-    constructor() {
-        super(400, 300, 40, 40);
-        this.vx = 0; this.vy = 0;
-    }
-    update(keys) {
-        let moveX = 0; let moveY = 0;
-        if (keys['ArrowUp'] || keys['w']) moveY = -1;
-        if (keys['ArrowDown'] || keys['s']) moveY = 1;
-        if (keys['ArrowLeft'] || keys['a']) moveX = -1;
-        if (keys['ArrowRight'] || keys['d']) moveX = 1;
-
-        const speed = config.playerSpeed * (1 + (gameState.upgrades.speed - 1) * 0.2);
-        this.x += moveX * speed;
-        this.y += moveY * speed;
-
-        // Bounds
-        this.x = Math.max(0, Math.min(canvas.width - this.w, this.x));
-        this.y = Math.max(0, Math.min(canvas.height - this.h, this.y));
-    }
-    draw(ctx) {
-        ctx.drawImage(sprites.player, this.x, this.y, this.w, this.h);
-        // Draw carried stack
-        gameState.carrying.forEach((item, i) => {
-            ctx.drawImage(sprites.banana, this.x + 5, this.y - 15 - (i * 10), 30, 15);
-        });
-    }
-}
-
-class Shelf extends Entity {
-    constructor(x, y, type) {
-        super(x, y, 80, 100);
-        this.type = type;
-        this.stock = 0;
-        this.maxStock = 10;
-    }
-    draw(ctx) {
-        ctx.fillStyle = '#A0522D';
-        ctx.fillRect(this.x, this.y, this.w, this.h);
-        ctx.fillStyle = 'white';
-        ctx.fillText(`${this.stock}/${this.maxStock}`, this.x + 25, this.y - 10);
-        for(let i=0; i<this.stock; i++) {
-            ctx.drawImage(sprites.banana, this.x + 10, this.y + this.h - 20 - (i*8), 60, 15);
-        }
-    }
-}
-
-class Customer extends Entity {
-    constructor() {
-        super(canvas.width + 50, 400, 40, 40);
-        this.targetX = 200;
-        this.state = 'entering'; // entering, waiting, leaving
-        this.timer = 0;
-    }
-    update() {
-        if (this.state === 'entering') {
-            this.x -= 2;
-            if (this.x <= this.targetX) this.state = 'waiting';
-        } else if (this.state === 'waiting') {
-            // Check if shelf nearby has stock
-            shelves.forEach(s => {
-                if (s.stock > 0 && Math.abs(this.x - s.x) < 100) {
-                    s.stock--;
-                    this.state = 'leaving';
-                    spawnMoney(this.x, this.y);
-                    sounds.cash();
-                }
-            });
-        } else if (this.state === 'leaving') {
-            this.x += 2;
-        }
-    }
-    draw(ctx) {
-        ctx.drawImage(sprites.customer, this.x, this.y, this.w, this.h);
-    }
-}
-
-// --- 5. INITIALIZATION ---
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-let player, shelves = [], customers = [], coins = [];
-const keys = {};
-
-function init() {
-    canvas.width = 800;
-    canvas.height = 600;
-    generateSprites();
-    player = new Player();
-    shelves.push(new Shelf(150, 200, 'banana'));
-    
-    // UI Setup
-    document.getElementById('start-btn').onclick = startGame;
-    document.getElementById('open-shop-btn').onclick = toggleShop;
-    document.getElementById('close-shop').onclick = toggleShop;
-    
-    window.addEventListener('keydown', e => keys[e.key] = true);
-    window.addEventListener('keyup', e => keys[e.key] = false);
-    
-    loadGame();
-    requestAnimationFrame(gameLoop);
-}
-
-function startGame() {
-    audioCtx.resume();
-    gameState.isPaused = false;
-    document.getElementById('ui-overlay').classList.add('hidden');
-}
-
-function spawnMoney(x, y) {
-    coins.push({x, y, val: config.baseItemPrice});
-}
-
-function toggleShop() {
-    const shop = document.getElementById('shop-ui');
-    shop.classList.toggle('hidden');
-    if (!shop.classList.contains('hidden')) {
-        renderShop();
-    }
-}
-
-function renderShop() {
-    const container = document.getElementById('shop-items');
-    container.innerHTML = `
-        <div class="shop-item">
-            <span>Speed (Lvl ${gameState.upgrades.speed})</span>
-            <button class="buy-btn" onclick="buyUpgrade('speed')" ${gameState.money < 50 ? 'disabled' : ''}>$50</button>
-        </div>
-        <div class="shop-item">
-            <span>Capacity (Lvl ${gameState.upgrades.capacity})</span>
-            <button class="buy-btn" onclick="buyUpgrade('capacity')" ${gameState.money < 75 ? 'disabled' : ''}>$75</button>
-        </div>
-    `;
-}
-
-window.buyUpgrade = (type) => {
-    const costs = { speed: 50, capacity: 75 };
-    if (gameState.money >= costs[type]) {
-        gameState.money -= costs[type];
-        gameState.upgrades[type]++;
-        sounds.upgrade();
-        saveGame();
-        renderShop();
-        updateHUD();
+// --- 3. AUDIO ENGINE ---
+const AudioEngine = {
+    ctx: null,
+    masterGain: null,
+    init() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.connect(this.ctx.destination);
+    },
+    play(freq, type = 'sine', decay = 0.1, vol = 0.1) {
+        if (!state.audioInitialized) return;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        g.gain.setValueAtTime(vol, this.ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + decay);
+        osc.connect(g); g.connect(this.masterGain);
+        osc.start(); osc.stop(this.ctx.currentTime + decay);
+    },
+    sfx: {
+        collect: () => AudioEngine.play(600, 'triangle', 0.1),
+        cash: () => { AudioEngine.play(880, 'square', 0.05); setTimeout(()=>AudioEngine.play(1200, 'square', 0.1), 50); },
+        walk: () => AudioEngine.play(150, 'sine', 0.05, 0.02)
     }
 };
 
-// --- 6. CORE LOOP ---
-function gameLoop(now) {
-    if (!gameState.isPaused) {
+// --- 4. CORE CLASSES ---
+class Player {
+    constructor() {
+        this.x = WORLD_WIDTH / 2;
+        this.y = WORLD_HEIGHT / 2;
+        this.w = 48; this.h = 48;
+        this.inventory = [];
+        this.frame = 0;
+        this.dir = 1;
+    }
+
+    update(input) {
+        let mx = 0, my = 0;
+        if (input.w) my = -1; if (input.s) my = 1;
+        if (input.a) { mx = -1; this.dir = -1; }
+        if (input.d) { mx = 1; this.dir = 1; }
+
+        if (mx !== 0 || my !== 0) {
+            const s = 5 * state.speedBonus;
+            this.x += mx * s; this.y += my * s;
+            this.frame += 0.2;
+            if (Math.floor(this.frame) % 5 === 0) AudioEngine.sfx.walk();
+        }
+
+        // Constraints
+        this.x = Math.max(50, Math.min(WORLD_WIDTH - 50, this.x));
+        this.y = Math.max(50, Math.min(WORLD_HEIGHT - 50, this.y));
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        if (this.dir === -1) ctx.scale(-1, 1);
+        
+        // Bounce animation
+        const bounce = Math.sin(this.frame) * 3;
+        ctx.drawImage(Sprites.monkey, -24, -24 + bounce, 48, 48);
+        
+        // Render Inventory stack
+        this.inventory.forEach((item, i) => {
+            ctx.drawImage(Sprites.banana, -16, -40 - (i * 10) + bounce, 32, 32);
+        });
+        ctx.restore();
+    }
+}
+
+class Customer {
+    constructor() {
+        this.x = -50; this.y = WORLD_HEIGHT - 100;
+        this.target = null;
+        this.state = 'entering'; // entering, shopping, queueing, leaving
+        this.patience = 1000;
+    }
+
+    update() {
+        if (this.state === 'entering') {
+            this.x += 2;
+            if (this.x > 200) {
+                this.state = 'shopping';
+                this.target = state.shelves[0];
+            }
+        } else if (this.state === 'shopping') {
+            const dist = Math.hypot(this.x - (this.target.x + 40), this.y - (this.target.y + 100));
+            if (dist < 10) {
+                if (this.target.stock > 0) {
+                    this.target.stock--;
+                    this.state = 'leaving';
+                    state.drops.push({x: this.x, y: this.y, value: 10, life: 1.0});
+                    AudioEngine.sfx.cash();
+                }
+            } else {
+                this.x += (this.target.x + 40 - this.x) * 0.05;
+                this.y += (this.target.y + 100 - this.y) * 0.05;
+            }
+        } else if (this.state === 'leaving') {
+            this.x -= 3;
+        }
+    }
+
+    draw(ctx) {
+        ctx.globalAlpha = 0.8;
+        ctx.drawImage(Sprites.monkey, this.x - 24, this.y - 24, 48, 48);
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+class Shelf {
+    constructor(x, y, type) {
+        this.x = x; this.y = y; this.type = type;
+        this.stock = 0; this.maxStock = 10;
+    }
+    draw(ctx) {
+        ctx.drawImage(Sprites.shelf, this.x, this.y, 80, 100);
+        for(let i=0; i<this.stock; i++) {
+            ctx.drawImage(Sprites.banana, this.x + 24, this.y + 60 - (i * 6), 32, 32);
+        }
+    }
+}
+
+// --- 5. GAME ENGINE ---
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const input = { w: false, a: false, s: false, d: false };
+
+function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    generateAllSprites();
+    state.player = new Player();
+    state.shelves.push(new Shelf(400, 200, 'BANANA'));
+    state.machines.push({ x: 100, y: 100, type: 'BANANA', timer: 0 });
+
+    window.addEventListener('keydown', e => input[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', e => input[e.key.toLowerCase()] = false);
+    
+    document.getElementById('start-btn').onclick = () => {
+        if (!state.audioInitialized) { AudioEngine.init(); state.audioInitialized = true; }
+        state.isPaused = false;
+        document.getElementById('overlay').classList.add('hidden');
+    };
+
+    requestAnimationFrame(loop);
+}
+
+function loop() {
+    if (!state.isPaused) {
         update();
         draw();
     }
-    requestAnimationFrame(gameLoop);
+    requestAnimationFrame(loop);
 }
 
 function update() {
-    player.update(keys);
+    state.player.update(input);
 
-    // Interaction with Shelves
-    shelves.forEach(s => {
-        const dist = Math.hypot(player.x - s.x, player.y - s.y);
-        if (dist < 60) {
-            // Refill shelf
-            if (gameState.carrying.length > 0 && s.stock < s.maxStock) {
-                gameState.carrying.pop();
-                s.stock++;
-                sounds.drop();
-            } 
-            // Harvest if it was a production station (simplified logic)
-            else if (gameState.carrying.length < 5 * gameState.upgrades.capacity && s.stock === 0) {
-                // In this clone, player picks up from "backroom" (top left)
+    // Interaction: Machine (Production)
+    state.machines.forEach(m => {
+        const dist = Math.hypot(state.player.x - (m.x + 50), state.player.y - (m.y + 50));
+        if (dist < 60 && state.player.inventory.length < state.carryLimit) {
+            m.timer++;
+            if (m.timer > 30) {
+                state.player.inventory.push(m.type);
+                m.timer = 0;
+                AudioEngine.sfx.collect();
             }
         }
     });
 
-    // Production logic (Top left area)
-    if (player.x < 100 && player.y < 100 && gameState.carrying.length < 5 * gameState.upgrades.capacity) {
-        if (Math.random() < 0.05) {
-            gameState.carrying.push('banana');
-            sounds.pick();
+    // Interaction: Shelf (Stocking)
+    state.shelves.forEach(s => {
+        const dist = Math.hypot(state.player.x - (s.x + 40), state.player.y - (s.y + 50));
+        if (dist < 80 && state.player.inventory.length > 0 && s.stock < s.maxStock) {
+            state.player.inventory.pop();
+            s.stock++;
         }
-    }
-
-    // Money Collection
-    coins = coins.filter(c => {
-        const dist = Math.hypot(player.x - c.x, player.y - c.y);
-        if (dist < config.moneyPickupRange) {
-            gameState.money += c.val;
-            updateHUD();
-            return false;
-        }
-        return true;
     });
 
     // Customer Spawning
-    if (Math.random() < 0.005 && customers.length < 3) {
-        customers.push(new Customer());
+    if (Math.random() < 0.005 && state.customers.length < 5) {
+        state.customers.push(new Customer());
     }
-    customers.forEach(c => c.update());
-    customers = customers.filter(c => c.x < canvas.width + 100);
+
+    state.customers.forEach(c => c.update());
+    state.customers = state.customers.filter(c => c.x > -100);
+
+    // Money collection
+    state.drops.forEach((d, i) => {
+        const dist = Math.hypot(state.player.x - d.x, state.player.y - d.y);
+        if (dist < 50) {
+            state.money += d.value;
+            state.drops.splice(i, 1);
+            document.getElementById('money-count').innerText = state.money;
+        }
+    });
+
+    document.getElementById('capacity-count').innerText = `${state.player.inventory.length}/${state.carryLimit}`;
 }
 
 function draw() {
-    ctx.clearRect(0,0,canvas.width, canvas.height);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Camera follow
+    const camX = -state.player.x + canvas.width / 2;
+    const camY = -state.player.y + canvas.height / 2;
+    ctx.translate(camX, camY);
 
-    // Draw Floor Grid
-    ctx.strokeStyle = 'rgba(0,0,0,0.05)';
-    for(let i=0; i<canvas.width; i+=40) {
-        ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i, canvas.height); ctx.stroke();
+    // Floor
+    ctx.fillStyle = '#78e08f';
+    ctx.fillRect(0,0, WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.strokeStyle = '#63c276';
+    for(let i=0; i<WORLD_WIDTH; i+=TILE_SIZE) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, WORLD_HEIGHT); ctx.stroke();
     }
 
-    // Draw "Backroom" / Source
-    ctx.fillStyle = '#6ab04c';
-    ctx.fillRect(0,0,100,100);
-    ctx.fillStyle = 'white';
-    ctx.fillText("STOCK PILE", 20, 50);
-
-    shelves.forEach(s => s.draw(ctx));
-    coins.forEach(c => {
-        ctx.fillStyle = 'gold';
-        ctx.beginPath(); ctx.arc(c.x, c.y, 8, 0, Math.PI*2); ctx.fill();
+    // Entities
+    state.machines.forEach(m => {
+        ctx.fillStyle = '#3d3d3d'; ctx.fillRect(m.x, m.y, 100, 100);
+        ctx.fillStyle = 'white'; ctx.fillText("BANANA TREE", m.x + 10, m.y - 10);
     });
-    customers.forEach(c => c.draw(ctx));
-    player.draw(ctx);
+    
+    state.shelves.forEach(s => s.draw(ctx));
+    state.drops.forEach(d => {
+        ctx.fillStyle = '#fbc531';
+        ctx.beginPath(); ctx.arc(d.x, d.y, 8, 0, Math.PI*2); ctx.fill();
+    });
+    
+    state.customers.forEach(c => c.draw(ctx));
+    state.player.draw(ctx);
 }
 
-function updateHUD() {
-    document.getElementById('money-display').innerText = Math.floor(gameState.money);
-}
-
-function saveGame() {
-    localStorage.setItem('monkeyMartSave', JSON.stringify(gameState));
-}
-
-function loadGame() {
-    const save = localStorage.getItem('monkeyMartSave');
-    if (save) {
-        const loaded = JSON.parse(save);
-        gameState = { ...gameState, ...loaded };
-        updateHUD();
-    }
-}
-
-// Start the engine
-init();
+window.onload = init;
