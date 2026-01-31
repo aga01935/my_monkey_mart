@@ -3,49 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Monkey Market - Idle Tycoon</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Monkey Market: Jungle Tycoon</title>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div id="game-container">
+    <div id="game-wrapper">
         <canvas id="gameCanvas"></canvas>
 
-        <div id="ui-overlay" class="overlay">
+        <div id="hud">
+            <div class="stat-pill">🍌 <span id="money-count">0</span></div>
+            <div class="stat-pill">📦 <span id="capacity-count">0/5</span></div>
+            <button id="pause-btn">II</button>
+        </div>
+
+        <div id="overlay" class="overlay">
             <div id="main-menu" class="menu-card">
                 <h1>MONKEY MARKET</h1>
-                <button id="start-btn" class="primary-btn">START GAME</button>
-                <button id="settings-btn" class="secondary-btn">SETTINGS</button>
+                <p>Build your empire, one banana at a time!</p>
+                <button id="start-btn" class="btn-primary">START PLAYING</button>
+                <button id="settings-btn" class="btn-secondary">SETTINGS</button>
+            </div>
+
+            <div id="shop-menu" class="menu-card hidden">
+                <div class="menu-header">
+                    <h2>MARKET UPGRADES</h2>
+                    <button class="close-btn">&times;</button>
+                </div>
+                <div class="shop-grid" id="shop-items">
+                    </div>
             </div>
 
             <div id="settings-menu" class="menu-card hidden">
                 <h2>SETTINGS</h2>
-                <div class="control-group">
-                    <label>Master Volume</label>
-                    <input type="range" id="master-vol" min="0" max="1" step="0.1" value="0.5">
+                <div class="setting-row">
+                    <span>Master Volume</span>
+                    <input type="range" id="master-vol" min="0" max="1" step="0.1" value="0.7">
                 </div>
-                <div class="control-group">
-                    <label>Music Volume</label>
-                    <input type="range" id="music-vol" min="0" max="1" step="0.1" value="0.3">
+                <div class="setting-row">
+                    <span>Music Volume</span>
+                    <input type="range" id="music-vol" min="0" max="1" step="0.1" value="0.4">
                 </div>
-                <button id="back-to-menu" class="secondary-btn">BACK</button>
-            </div>
-
-            <div id="shop-ui" class="shop-card hidden">
-                <div class="shop-header">
-                    <h2>UPGRADES</h2>
-                    <button id="close-shop">X</button>
-                </div>
-                <div id="shop-items">
-                    </div>
+                <button id="settings-back" class="btn-secondary">BACK</button>
             </div>
         </div>
 
-        <div id="hud">
-            <div class="stat-box">🍌 <span id="money-display">0</span></div>
-            <button id="open-shop-btn">🏪 SHOP</button>
-        </div>
+        <div id="action-prompt" class="hidden">Hold to Upgrade</div>
     </div>
-
-    <script src="main.js"></script>
+    <script src="js/main.js"></script>
 </body>
 </html>
