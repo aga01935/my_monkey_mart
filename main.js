@@ -1,136 +1,249 @@
 /**
- * MONKEY MARKET - PRODUCTION BUILD (RESPONSIVE + TOUCH)
+ * MONKEY MARKET - PROFESSIONAL CORE ENGINE
+ * Features: Responsive Canvas, Virtual Joystick, Procedural Texturing, 
+ * Mobile Touch Optimization, and Entity Management.
  */
+
+// --- 1. ENGINE CONFIGURATION ---
+const CONFIG = {
+    PLAYER_SPEED: 5,
+    CARRY_LIMIT_BASE: 5,
+    WORLD_UNIT: 64,
+    JOYSTICK_THRESHOLD: 0.1
+};
 
 const state = {
     money: 0,
     isPaused: true,
-    input: { x: 0, y: 0 }, // Normalized -1 to 1
+    input: { x: 0, y: 0 },
     joystickActive: false,
-    canvasScale: 1
+    entities: [],
+    lastTime: 0,
+    floorPattern: null
 };
 
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-let floorPattern;
+// --- 2. CORE CLASSES ---
 
-// --- 1. RESPONSIVE ENGINE ---
-function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    
-    // Create actual grass/tile texture
-    const tempCanvas = document.createElement('canvas');
-    const tCtx = tempCanvas.getContext('2d');
-    tempCanvas.width = 64; tempCanvas.height = 64;
-    tCtx.fillStyle = '#78e08f'; // Base Grass
-    tCtx.fillRect(0,0,64,64);
-    tCtx.strokeStyle = '#63c276'; // Blade Detail
-    tCtx.lineWidth = 2;
-    tCtx.beginPath(); tCtx.moveTo(10, 64); tCtx.lineTo(15, 45); tCtx.stroke();
-    tCtx.beginPath(); tCtx.moveTo(40, 64); tCtx.lineTo(35, 50); tCtx.stroke();
-    
-    floorPattern = ctx.createPattern(tempCanvas, 'repeat');
-}
-
-window.addEventListener('resize', resize);
-resize();
-
-// --- 2. TOUCH & JOYSTICK LOGIC ---
-const joyBase = document.getElementById('joystick-base');
-const joyKnob = document.getElementById('joystick-knob');
-const joyContainer = document.getElementById('joystick-container');
-
-if ('ontouchstart' in window) {
-    joyContainer.style.display = 'block';
-}
-
-function handleJoystick(e) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const rect = joyBase.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    
-    let dx = touch.clientX - centerX;
-    let dy = touch.clientY - centerY;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    const maxDist = rect.width / 2;
-
-    if (dist > maxDist) {
-        dx *= maxDist / dist;
-        dy *= maxDist / dist;
-    }
-
-    state.input.x = dx / maxDist;
-    state.input.y = dy / maxDist;
-    
-    joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-}
-
-joyContainer.addEventListener('touchstart', () => state.joystickActive = true);
-joyContainer.addEventListener('touchmove', handleJoystick);
-joyContainer.addEventListener('touchend', () => {
-    state.joystickActive = false;
-    state.input = { x: 0, y: 0 };
-    joyKnob.style.transform = `translate(-50%, -50%)`;
-});
-
-// Keyboard Fallback
-window.addEventListener('keydown', e => {
-    if(e.key === 'ArrowUp' || e.key === 'w') state.input.y = -1;
-    if(e.key === 'ArrowDown' || e.key === 's') state.input.y = 1;
-    if(e.key === 'ArrowLeft' || e.key === 'a') state.input.x = -1;
-    if(e.key === 'ArrowRight' || e.key === 'd') state.input.x = 1;
-});
-window.addEventListener('keyup', () => state.input = { x: 0, y: 0 });
-
-// --- 3. UPDATED PLAYER & RENDER ---
 class Player {
-    constructor() {
-        this.x = window.innerWidth / 2;
-        this.y = window.innerHeight / 2;
-        this.radius = 25;
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 22;
+        this.inventory = [];
+        this.angle = 0;
+        this.walkCycle = 0;
     }
 
     update() {
-        this.x += state.input.x * 5;
-        this.y += state.input.y * 5;
+        if (Math.abs(state.input.x) < CONFIG.JOYSTICK_THRESHOLD && 
+            Math.abs(state.input.y) < CONFIG.JOYSTICK_THRESHOLD) return;
+
+        // Movement Logic
+        this.x += state.input.x * CONFIG.PLAYER_SPEED;
+        this.y += state.input.y * CONFIG.PLAYER_SPEED;
+
+        // Calculate Angle for Sprite Orientation
+        this.angle = Math.atan2(state.input.y, state.input.x);
+        this.walkCycle += 0.15;
+
+        // World Bounds
+        this.x = Math.max(this.radius, Math.min(window.innerWidth - this.radius, this.x));
+        this.y = Math.max(this.radius, Math.min(window.innerHeight - this.radius, this.y));
     }
 
-    draw() {
-        // Shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        ctx.beginPath(); ctx.ellipse(this.x, this.y + 20, 20, 10, 0, 0, Math.PI*2); ctx.fill();
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
         
-        // Simple High-Fidelity Monkey Circle
-        ctx.fillStyle = '#8c7e6a';
-        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = '#f5f6fa'; // Face
-        ctx.beginPath(); ctx.arc(this.x, this.y - 2, 15, 0, Math.PI*2); ctx.fill();
+        // Shadow
+        ctx.fillStyle = "rgba(0,0,0,0.15)";
+        ctx.beginPath();
+        ctx.ellipse(0, 20, 18, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Animated Body Bounce
+        const bounce = Math.sin(this.walkCycle) * 3;
+        
+        // Monkey Body (High-Fidelity Shape)
+        ctx.rotate(this.angle + Math.PI/2);
+        ctx.fillStyle = "#8c7e6a"; // Fur
+        ctx.beginPath();
+        ctx.arc(0, bounce, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Monkey Face
+        ctx.fillStyle = "#f5f6fa"; // Face Skin
+        ctx.beginPath();
+        ctx.arc(0, bounce - 5, 12, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = "#2f3640";
+        ctx.beginPath();
+        ctx.arc(-5, bounce - 7, 2, 0, Math.PI * 2);
+        ctx.arc(5, bounce - 7, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
     }
 }
 
-const player = new Player();
+// --- 3. INPUT MANAGEMENT (MOBILE & DESKTOP) ---
 
-function mainLoop() {
+const InputManager = {
+    init() {
+        const joyBase = document.getElementById('joystick-base');
+        const joyKnob = document.getElementById('joystick-knob');
+        const joyContainer = document.getElementById('joystick-container');
+
+        // Show joystick on touch devices
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            joyContainer.style.display = 'block';
+        }
+
+        const handleMove = (touchX, touchY) => {
+            const rect = joyBase.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            
+            let dx = touchX - centerX;
+            let dy = touchY - centerY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const maxDist = rect.width / 2;
+
+            if (dist > maxDist) {
+                dx *= maxDist / dist;
+                dy *= maxDist / dist;
+            }
+
+            state.input.x = dx / maxDist;
+            state.input.y = dy / maxDist;
+            joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        };
+
+        // Touch Listeners
+        joyContainer.addEventListener('touchstart', (e) => {
+            state.joystickActive = true;
+            handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            if (e.cancelable) e.preventDefault();
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (e) => {
+            if (state.joystickActive) {
+                handleMove(e.touches[0].clientX, e.touches[0].clientY);
+                if (e.cancelable) e.preventDefault();
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchend', () => {
+            state.joystickActive = false;
+            state.input = { x: 0, y: 0 };
+            joyKnob.style.transform = `translate(-50%, -50%)`;
+        });
+
+        // Keyboard Fallback
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            updateKeyboardInput();
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+            updateKeyboardInput();
+        });
+
+        function updateKeyboardInput() {
+            if (state.joystickActive) return;
+            state.input.x = (keys['a'] || keys['arrowleft'] ? -1 : 0) + (keys['d'] || keys['arrowright'] ? 1 : 0);
+            state.input.y = (keys['w'] || keys['arrowup'] ? -1 : 0) + (keys['s'] || keys['arrowdown'] ? 1 : 0);
+        }
+    }
+};
+
+// --- 4. GRAPHICS ENGINE ---
+
+const Graphics = {
+    canvas: document.getElementById('gameCanvas'),
+    ctx: document.getElementById('gameCanvas').getContext('2d'),
+
+    init() {
+        window.addEventListener('resize', () => this.resize());
+        this.resize();
+    },
+
+    resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.createFloorPattern();
+    },
+
+    createFloorPattern() {
+        const pCanvas = document.createElement('canvas');
+        const pCtx = pCanvas.getContext('2d');
+        pCanvas.width = 128; pCanvas.height = 128;
+
+        // Grass Base
+        pCtx.fillStyle = '#78e08f';
+        pCtx.fillRect(0, 0, 128, 128);
+
+        // Texture Details (Blades of grass)
+        pCtx.strokeStyle = '#63c276';
+        pCtx.lineWidth = 2;
+        for (let i = 0; i < 8; i++) {
+            const x = Math.random() * 128;
+            const y = Math.random() * 128;
+            pCtx.beginPath();
+            pCtx.moveTo(x, y);
+            pCtx.lineTo(x + 2, y - 5);
+            pCtx.stroke();
+        }
+
+        state.floorPattern = this.ctx.createPattern(pCanvas, 'repeat');
+    },
+
+    render(player) {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw Background
+        if (state.floorPattern) {
+            this.ctx.fillStyle = state.floorPattern;
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        // Grid lines for depth
+        this.ctx.strokeStyle = 'rgba(0,0,0,0.03)';
+        this.ctx.lineWidth = 1;
+        for (let x = 0; x < this.canvas.width; x += CONFIG.WORLD_UNIT) {
+            this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, this.canvas.height); this.ctx.stroke();
+        }
+        for (let y = 0; y < this.canvas.height; y += CONFIG.WORLD_UNIT) {
+            this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(this.canvas.width, y); this.ctx.stroke();
+        }
+
+        player.draw(this.ctx);
+    }
+};
+
+// --- 5. MAIN GAME LOOP ---
+
+const player = new Player(window.innerWidth / 2, window.innerHeight / 2);
+
+function tick(timestamp) {
     if (!state.isPaused) {
         player.update();
-        
-        // DRAWING
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Apply Textured Background
-        ctx.fillStyle = floorPattern;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        player.draw();
+        Graphics.render(player);
     }
-    requestAnimationFrame(mainLoop);
+    requestAnimationFrame(tick);
 }
 
+// Start Command
 document.getElementById('start-btn').onclick = () => {
     state.isPaused = false;
     document.getElementById('overlay').classList.add('hidden');
-    mainLoop();
+    
+    // Initializing Systems
+    Graphics.init();
+    InputManager.init();
+    
+    requestAnimationFrame(tick);
 };
