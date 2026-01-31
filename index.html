@@ -2,55 +2,32 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Monkey Market: Jungle Tycoon</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Monkey Market Pro</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="game-wrapper">
         <canvas id="gameCanvas"></canvas>
+        
+        <div id="joystick-container">
+            <div id="joystick-base">
+                <div id="joystick-knob"></div>
+            </div>
+        </div>
 
         <div id="hud">
             <div class="stat-pill">🍌 <span id="money-count">0</span></div>
-            <div class="stat-pill">📦 <span id="capacity-count">0/5</span></div>
-            <button id="pause-btn">II</button>
+            <button id="pause-btn">MENU</button>
         </div>
 
         <div id="overlay" class="overlay">
             <div id="main-menu" class="menu-card">
                 <h1>MONKEY MARKET</h1>
-                <p>Build your empire, one banana at a time!</p>
-                <button id="start-btn" class="btn-primary">START PLAYING</button>
-                <button id="settings-btn" class="btn-secondary">SETTINGS</button>
-            </div>
-
-            <div id="shop-menu" class="menu-card hidden">
-                <div class="menu-header">
-                    <h2>MARKET UPGRADES</h2>
-                    <button class="close-btn">&times;</button>
-                </div>
-                <div class="shop-grid" id="shop-items">
-                    </div>
-            </div>
-
-            <div id="settings-menu" class="menu-card hidden">
-                <h2>SETTINGS</h2>
-                <div class="setting-row">
-                    <span>Master Volume</span>
-                    <input type="range" id="master-vol" min="0" max="1" step="0.1" value="0.7">
-                </div>
-                <div class="setting-row">
-                    <span>Music Volume</span>
-                    <input type="range" id="music-vol" min="0" max="1" step="0.1" value="0.4">
-                </div>
-                <button id="settings-back" class="btn-secondary">BACK</button>
+                <button id="start-btn" class="btn-primary">PLAY NOW</button>
             </div>
         </div>
-
-        <div id="action-prompt" class="hidden">Hold to Upgrade</div>
     </div>
     <script src="main.js"></script>
 </body>
 </html>
-
-
