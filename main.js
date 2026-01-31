@@ -1,315 +1,136 @@
 /**
- * MONKEY MARKET - PRINCIPAL ENGINEER IMPLEMENTATION
- * Includes: Entity Systems, Pathfinding, Visual Synthesis, and Sound Engine.
+ * MONKEY MARKET - PRODUCTION BUILD (RESPONSIVE + TOUCH)
  */
 
-// --- 1. GAME CONSTANTS & STATE ---
-const TILE_SIZE = 64;
-const WORLD_WIDTH = 1200;
-const WORLD_HEIGHT = 900;
-
-let state = {
+const state = {
     money: 0,
-    player: null,
-    entities: [],
-    customers: [],
-    workers: [],
-    shelves: [],
-    machines: [],
-    drops: [],
-    unlockedZones: 1,
-    carryLimit: 5,
-    speedBonus: 1,
     isPaused: true,
-    audioInitialized: false
+    input: { x: 0, y: 0 }, // Normalized -1 to 1
+    joystickActive: false,
+    canvasScale: 1
 };
 
-const PRODUCT_TYPES = {
-    BANANA: { name: 'Banana', color: '#fbc531', price: 10, growTime: 2000 },
-    CORN: { name: 'Corn', color: '#e1b12c', price: 25, growTime: 4000 },
-    MILK: { name: 'Milk', color: '#f5f6fa', price: 50, growTime: 6000 }
-};
-
-// --- 2. ASSET GENERATOR (High Fidelity Procedural Art) ---
-const Sprites = {};
-function generateAllSprites() {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    const createTexture = (w, h, drawFn) => {
-        canvas.width = w; canvas.height = h;
-        ctx.clearRect(0,0,w,h);
-        drawFn(ctx);
-        const img = new Image();
-        img.src = canvas.toDataURL();
-        return img;
-    };
-
-    // Monkey Sprite (Head, Ears, Body, Tail)
-    Sprites.monkey = createTexture(64, 64, (c) => {
-        c.fillStyle = '#8c7e6a';
-        c.beginPath(); c.arc(32, 45, 18, 0, Math.PI*2); c.fill(); // Body
-        c.beginPath(); c.arc(32, 25, 15, 0, Math.PI*2); c.fill(); // Head
-        c.fillStyle = '#f5f6fa';
-        c.beginPath(); c.arc(32, 28, 10, 0, Math.PI*2); c.fill(); // Face
-        c.fillStyle = '#2f3640';
-        c.beginPath(); c.arc(28, 25, 2, 0, Math.PI*2); c.fill(); // Left Eye
-        c.beginPath(); c.arc(36, 25, 2, 0, Math.PI*2); c.fill(); // Right Eye
-        c.strokeStyle = '#574b90'; c.lineWidth = 3;
-        c.beginPath(); c.moveTo(15, 45); c.quadraticCurveTo(5, 50, 10, 60); c.stroke(); // Tail
-    });
-
-    // Shelf Sprite
-    Sprites.shelf = createTexture(100, 120, (c) => {
-        c.fillStyle = '#4b4b4b'; c.fillRect(5, 10, 90, 100); // Back
-        c.fillStyle = '#dcdde1'; 
-        c.fillRect(5, 40, 90, 10); c.fillRect(5, 75, 90, 10); // Planks
-    });
-
-    // Banana Sprite
-    Sprites.banana = createTexture(32, 32, (c) => {
-        c.fillStyle = '#fbc531';
-        c.beginPath(); c.ellipse(16, 16, 12, 6, Math.PI/4, 0, Math.PI*2); c.fill();
-    });
-}
-
-// --- 3. AUDIO ENGINE ---
-const AudioEngine = {
-    ctx: null,
-    masterGain: null,
-    init() {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.masterGain = this.ctx.createGain();
-        this.masterGain.connect(this.ctx.destination);
-    },
-    play(freq, type = 'sine', decay = 0.1, vol = 0.1) {
-        if (!state.audioInitialized) return;
-        const osc = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-        g.gain.setValueAtTime(vol, this.ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + decay);
-        osc.connect(g); g.connect(this.masterGain);
-        osc.start(); osc.stop(this.ctx.currentTime + decay);
-    },
-    sfx: {
-        collect: () => AudioEngine.play(600, 'triangle', 0.1),
-        cash: () => { AudioEngine.play(880, 'square', 0.05); setTimeout(()=>AudioEngine.play(1200, 'square', 0.1), 50); },
-        walk: () => AudioEngine.play(150, 'sine', 0.05, 0.02)
-    }
-};
-
-// --- 4. CORE CLASSES ---
-class Player {
-    constructor() {
-        this.x = WORLD_WIDTH / 2;
-        this.y = WORLD_HEIGHT / 2;
-        this.w = 48; this.h = 48;
-        this.inventory = [];
-        this.frame = 0;
-        this.dir = 1;
-    }
-
-    update(input) {
-        let mx = 0, my = 0;
-        if (input.w) my = -1; if (input.s) my = 1;
-        if (input.a) { mx = -1; this.dir = -1; }
-        if (input.d) { mx = 1; this.dir = 1; }
-
-        if (mx !== 0 || my !== 0) {
-            const s = 5 * state.speedBonus;
-            this.x += mx * s; this.y += my * s;
-            this.frame += 0.2;
-            if (Math.floor(this.frame) % 5 === 0) AudioEngine.sfx.walk();
-        }
-
-        // Constraints
-        this.x = Math.max(50, Math.min(WORLD_WIDTH - 50, this.x));
-        this.y = Math.max(50, Math.min(WORLD_HEIGHT - 50, this.y));
-    }
-
-    draw(ctx) {
-        ctx.save();
-        ctx.translate(this.x, this.y);
-        if (this.dir === -1) ctx.scale(-1, 1);
-        
-        // Bounce animation
-        const bounce = Math.sin(this.frame) * 3;
-        ctx.drawImage(Sprites.monkey, -24, -24 + bounce, 48, 48);
-        
-        // Render Inventory stack
-        this.inventory.forEach((item, i) => {
-            ctx.drawImage(Sprites.banana, -16, -40 - (i * 10) + bounce, 32, 32);
-        });
-        ctx.restore();
-    }
-}
-
-class Customer {
-    constructor() {
-        this.x = -50; this.y = WORLD_HEIGHT - 100;
-        this.target = null;
-        this.state = 'entering'; // entering, shopping, queueing, leaving
-        this.patience = 1000;
-    }
-
-    update() {
-        if (this.state === 'entering') {
-            this.x += 2;
-            if (this.x > 200) {
-                this.state = 'shopping';
-                this.target = state.shelves[0];
-            }
-        } else if (this.state === 'shopping') {
-            const dist = Math.hypot(this.x - (this.target.x + 40), this.y - (this.target.y + 100));
-            if (dist < 10) {
-                if (this.target.stock > 0) {
-                    this.target.stock--;
-                    this.state = 'leaving';
-                    state.drops.push({x: this.x, y: this.y, value: 10, life: 1.0});
-                    AudioEngine.sfx.cash();
-                }
-            } else {
-                this.x += (this.target.x + 40 - this.x) * 0.05;
-                this.y += (this.target.y + 100 - this.y) * 0.05;
-            }
-        } else if (this.state === 'leaving') {
-            this.x -= 3;
-        }
-    }
-
-    draw(ctx) {
-        ctx.globalAlpha = 0.8;
-        ctx.drawImage(Sprites.monkey, this.x - 24, this.y - 24, 48, 48);
-        ctx.globalAlpha = 1.0;
-    }
-}
-
-class Shelf {
-    constructor(x, y, type) {
-        this.x = x; this.y = y; this.type = type;
-        this.stock = 0; this.maxStock = 10;
-    }
-    draw(ctx) {
-        ctx.drawImage(Sprites.shelf, this.x, this.y, 80, 100);
-        for(let i=0; i<this.stock; i++) {
-            ctx.drawImage(Sprites.banana, this.x + 24, this.y + 60 - (i * 6), 32, 32);
-        }
-    }
-}
-
-// --- 5. GAME ENGINE ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const input = { w: false, a: false, s: false, d: false };
+let floorPattern;
 
-function init() {
+// --- 1. RESPONSIVE ENGINE ---
+function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     
-    generateAllSprites();
-    state.player = new Player();
-    state.shelves.push(new Shelf(400, 200, 'BANANA'));
-    state.machines.push({ x: 100, y: 100, type: 'BANANA', timer: 0 });
-
-    window.addEventListener('keydown', e => input[e.key.toLowerCase()] = true);
-    window.addEventListener('keyup', e => input[e.key.toLowerCase()] = false);
+    // Create actual grass/tile texture
+    const tempCanvas = document.createElement('canvas');
+    const tCtx = tempCanvas.getContext('2d');
+    tempCanvas.width = 64; tempCanvas.height = 64;
+    tCtx.fillStyle = '#78e08f'; // Base Grass
+    tCtx.fillRect(0,0,64,64);
+    tCtx.strokeStyle = '#63c276'; // Blade Detail
+    tCtx.lineWidth = 2;
+    tCtx.beginPath(); tCtx.moveTo(10, 64); tCtx.lineTo(15, 45); tCtx.stroke();
+    tCtx.beginPath(); tCtx.moveTo(40, 64); tCtx.lineTo(35, 50); tCtx.stroke();
     
-    document.getElementById('start-btn').onclick = () => {
-        if (!state.audioInitialized) { AudioEngine.init(); state.audioInitialized = true; }
-        state.isPaused = false;
-        document.getElementById('overlay').classList.add('hidden');
-    };
-
-    requestAnimationFrame(loop);
+    floorPattern = ctx.createPattern(tempCanvas, 'repeat');
 }
 
-function loop() {
+window.addEventListener('resize', resize);
+resize();
+
+// --- 2. TOUCH & JOYSTICK LOGIC ---
+const joyBase = document.getElementById('joystick-base');
+const joyKnob = document.getElementById('joystick-knob');
+const joyContainer = document.getElementById('joystick-container');
+
+if ('ontouchstart' in window) {
+    joyContainer.style.display = 'block';
+}
+
+function handleJoystick(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = joyBase.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    let dx = touch.clientX - centerX;
+    let dy = touch.clientY - centerY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const maxDist = rect.width / 2;
+
+    if (dist > maxDist) {
+        dx *= maxDist / dist;
+        dy *= maxDist / dist;
+    }
+
+    state.input.x = dx / maxDist;
+    state.input.y = dy / maxDist;
+    
+    joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+}
+
+joyContainer.addEventListener('touchstart', () => state.joystickActive = true);
+joyContainer.addEventListener('touchmove', handleJoystick);
+joyContainer.addEventListener('touchend', () => {
+    state.joystickActive = false;
+    state.input = { x: 0, y: 0 };
+    joyKnob.style.transform = `translate(-50%, -50%)`;
+});
+
+// Keyboard Fallback
+window.addEventListener('keydown', e => {
+    if(e.key === 'ArrowUp' || e.key === 'w') state.input.y = -1;
+    if(e.key === 'ArrowDown' || e.key === 's') state.input.y = 1;
+    if(e.key === 'ArrowLeft' || e.key === 'a') state.input.x = -1;
+    if(e.key === 'ArrowRight' || e.key === 'd') state.input.x = 1;
+});
+window.addEventListener('keyup', () => state.input = { x: 0, y: 0 });
+
+// --- 3. UPDATED PLAYER & RENDER ---
+class Player {
+    constructor() {
+        this.x = window.innerWidth / 2;
+        this.y = window.innerHeight / 2;
+        this.radius = 25;
+    }
+
+    update() {
+        this.x += state.input.x * 5;
+        this.y += state.input.y * 5;
+    }
+
+    draw() {
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath(); ctx.ellipse(this.x, this.y + 20, 20, 10, 0, 0, Math.PI*2); ctx.fill();
+        
+        // Simple High-Fidelity Monkey Circle
+        ctx.fillStyle = '#8c7e6a';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#f5f6fa'; // Face
+        ctx.beginPath(); ctx.arc(this.x, this.y - 2, 15, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+const player = new Player();
+
+function mainLoop() {
     if (!state.isPaused) {
-        update();
-        draw();
+        player.update();
+        
+        // DRAWING
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Apply Textured Background
+        ctx.fillStyle = floorPattern;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        player.draw();
     }
-    requestAnimationFrame(loop);
+    requestAnimationFrame(mainLoop);
 }
 
-function update() {
-    state.player.update(input);
-
-    // Interaction: Machine (Production)
-    state.machines.forEach(m => {
-        const dist = Math.hypot(state.player.x - (m.x + 50), state.player.y - (m.y + 50));
-        if (dist < 60 && state.player.inventory.length < state.carryLimit) {
-            m.timer++;
-            if (m.timer > 30) {
-                state.player.inventory.push(m.type);
-                m.timer = 0;
-                AudioEngine.sfx.collect();
-            }
-        }
-    });
-
-    // Interaction: Shelf (Stocking)
-    state.shelves.forEach(s => {
-        const dist = Math.hypot(state.player.x - (s.x + 40), state.player.y - (s.y + 50));
-        if (dist < 80 && state.player.inventory.length > 0 && s.stock < s.maxStock) {
-            state.player.inventory.pop();
-            s.stock++;
-        }
-    });
-
-    // Customer Spawning
-    if (Math.random() < 0.005 && state.customers.length < 5) {
-        state.customers.push(new Customer());
-    }
-
-    state.customers.forEach(c => c.update());
-    state.customers = state.customers.filter(c => c.x > -100);
-
-    // Money collection
-    state.drops.forEach((d, i) => {
-        const dist = Math.hypot(state.player.x - d.x, state.player.y - d.y);
-        if (dist < 50) {
-            state.money += d.value;
-            state.drops.splice(i, 1);
-            document.getElementById('money-count').innerText = state.money;
-        }
-    });
-
-    document.getElementById('capacity-count').innerText = `${state.player.inventory.length}/${state.carryLimit}`;
-}
-
-function draw() {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Camera follow
-    const camX = -state.player.x + canvas.width / 2;
-    const camY = -state.player.y + canvas.height / 2;
-    ctx.translate(camX, camY);
-
-    // Floor
-    ctx.fillStyle = '#78e08f';
-    ctx.fillRect(0,0, WORLD_WIDTH, WORLD_HEIGHT);
-    ctx.strokeStyle = '#63c276';
-    for(let i=0; i<WORLD_WIDTH; i+=TILE_SIZE) {
-        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, WORLD_HEIGHT); ctx.stroke();
-    }
-
-    // Entities
-    state.machines.forEach(m => {
-        ctx.fillStyle = '#3d3d3d'; ctx.fillRect(m.x, m.y, 100, 100);
-        ctx.fillStyle = 'white'; ctx.fillText("BANANA TREE", m.x + 10, m.y - 10);
-    });
-    
-    state.shelves.forEach(s => s.draw(ctx));
-    state.drops.forEach(d => {
-        ctx.fillStyle = '#fbc531';
-        ctx.beginPath(); ctx.arc(d.x, d.y, 8, 0, Math.PI*2); ctx.fill();
-    });
-    
-    state.customers.forEach(c => c.draw(ctx));
-    state.player.draw(ctx);
-}
-
-window.onload = init;
+document.getElementById('start-btn').onclick = () => {
+    state.isPaused = false;
+    document.getElementById('overlay').classList.add('hidden');
+    mainLoop();
+};
